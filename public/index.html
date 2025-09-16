@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Bara Al-Salfa (برا السالفة) – Online</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>برا السالفة – Bara Al-Salfa</h1>
+      <nav>
+        <button id="tab-game" class="active">Game</button>
+        <button id="tab-admin">Admin</button>
+        <button id="tab-leaderboard">Leaderboard</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- GAME TAB -->
+      <section id="pane-game" class="pane">
+        <div class="card">
+          <h2>Room</h2>
+          <div class="row">
+            <input id="nickname" placeholder="Your nickname" />
+            <button id="btn-create">Create Room</button>
+            <input id="room-code" placeholder="CODE" maxlength="6" />
+            <button id="btn-join">Join</button>
+          </div>
+          <div id="room-info" class="muted"></div>
+
+          <div id="lobby" class="grid two">
+            <div>
+              <h3>Players</h3>
+              <ul id="players"></ul>
+            </div>
+            <div>
+              <h3>Host Controls</h3>
+              <div id="host-controls" class="stack">
+                <select id="subject-select"></select>
+                <button id="btn-start-round">Start Round</button>
+                <button id="btn-to-qa" class="secondary">Start Q&A Phase</button>
+                <button id="btn-random-prompt">Random Prompt</button>
+                <button id="btn-to-vote" class="secondary">Go to Voting</button>
+                <button id="btn-announce-out" class="accent">Announce OUT & Ask Guess</button>
+              </div>
+              <div id="coverage-hint" class="muted"></div>
+              <div id="error-box" class="muted" style="color:#ffb4b4;"></div>
+            </div>
+          </div>
+
+          <div id="phase-reveal" class="phase hidden">
+            <h3>Reveal</h3>
+            <p id="reveal-text"></p>
+            <p class="muted">Pass the phone to each player as prompted.</p>
+          </div>
+
+          <div id="phase-qa" class="phase hidden">
+            <h3>Q&A</h3>
+            <div class="row">
+              <div id="prompt-text" class="prompt"></div>
+            </div>
+            <p class="muted">Each player must ask or answer at least once before voting.</p>
+          </div>
+
+          <div id="phase-vote" class="phase hidden">
+            <h3>Voting</h3>
+            <div id="vote-grid" class="grid three"></div>
+            <div id="vote-status" class="muted"></div>
+          </div>
+
+          <div id="phase-guess" class="phase hidden">
+            <h3>OUT’s Guess</h3>
+            <p id="announce-text"></p>
+            <div id="guess-options" class="grid three"></div>
+            <div id="guess-status" class="muted"></div>
+          </div>
+
+          <div id="phase-result" class="phase hidden">
+            <h3>Result</h3>
+            <p id="result-text"></p>
+            <div id="scores" class="grid two"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ADMIN TAB -->
+      <section id="pane-admin" class="pane hidden">
+        <div class="card">
+          <h2>Subjects & Items</h2>
+          <div class="row">
+            <input id="new-subject" placeholder="New subject (e.g., Famous People)" />
+            <button id="btn-add-subject">Add Subject</button>
+          </div>
+          <div class="row">
+            <input id="item-subject" placeholder="Subject name" />
+            <input id="item-value" placeholder="Item value (e.g., Michael Jackson)" />
+            <button id="btn-add-item">Add Item</button>
+          </div>
+          <div id="subjects" class="stack"></div>
+        </div>
+      </section>
+
+      <!-- LEADERBOARD TAB -->
+      <section id="pane-leaderboard" class="pane hidden">
+        <div class="card">
+          <h2>Leaderboard</h2>
+          <ul id="leaderboard"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/client.js"></script>
+</body>
+</html>
