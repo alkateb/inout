@@ -8,25 +8,16 @@ import fs from 'fs';
 import path from 'path';
 import url from 'url';
 
-/* ------------------------------------------------
-   Setup & Paths (ESM-friendly)
---------------------------------------------------*/
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/* ------------------------------------------------
-   Database bootstrap
-   - Uses DB_FILE env var (default ./game.db)
-   - Auto-inits schema if file doesn't exist
-   - Optional: `node server.js --init-db`
---------------------------------------------------*/
+// ==== DB bootstrap (env-configurable path) ====
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'game.db');
 
 function ensureDirExists(filePath) {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
-
 function initDbAt(filePath) {
   ensureDirExists(filePath);
   const db = new Database(filePath);
@@ -35,25 +26,13 @@ function initDbAt(filePath) {
   db.close();
   console.log('Database initialized at', filePath);
 }
-
-// CLI init (idempotent)
-if (process.argv.includes('--init-db')) {
-  initDbAt(DB_FILE);
-  process.exit(0);
-}
-
-// Auto-init if missing
 if (!fs.existsSync(DB_FILE)) {
   console.log('DB not found, initializing at', DB_FILE);
   initDbAt(DB_FILE);
 }
-
-// Open DB
 const db = new Database(DB_FILE);
 
-/* ------------------------------------------------
-   Prepared statements
---------------------------------------------------*/
+// ==== Prepared statements ====
 const q = {
   subjectsAll: db.prepare('SELECT id, name FROM subjects ORDER BY name'),
   itemsBySubject: db.prepare('SELECT id, value FROM items WHERE subject_id = ? ORDER BY value'),
@@ -61,66 +40,49 @@ const q = {
   subjectInsert: db.prepare('INSERT OR IGNORE INTO subjects (name) VALUES (?)'),
   itemInsert: db.prepare('INSERT OR IGNORE INTO items (subject_id, value) VALUES (?, ?)'),
   itemDelete: db.prepare('DELETE FROM items WHERE id = ?'),
-  addScore: db.prepare(
-    'INSERT INTO scores (nickname, points) VALUES (?, ?) ON CONFLICT(nickname) DO UPDATE SET points = points + excluded.points'
-  ),
-  topScores: db.prepare('SELECT nickname, points FROM scores ORDER BY points DESC LIMIT 50')
+  addScore: db.prepare('INSERT INTO scores (nickname, points) VALUES (?, ?) ON CONFLICT(nickname) DO UPDATE SET points = points + excluded.points'),
+  topScores: db.prepare('SELECT nickname, points FROM scores ORDER BY points DESC LIMIT 50'),
+  scoresClear: db.prepare('DELETE FROM scores')
 };
 
-/* ------------------------------------------------
-   In-memory game state
---------------------------------------------------*/
+// ==== In-memory room state ====
 /**
- rooms[code] = {
-   code,
-   hostId,
-   players: { socketId: { id, name, score, inRoundRole: 'IN'|'OUT'|null } },
+ room = {
+   code, hostId,
+   players: { socketId: { id, name, score, inRoundRole } },
    order: [socketId,...],
    phase: 'LOBBY'|'REVEAL'|'QA'|'VOTE'|'GUESS'|'RESULT',
-   subjectId,
-   subjectName,
-   secretItem,
+   subjectId, subjectName, secretItem,
    outSocketId,
    asked: Set<socketId>,
    answered: Set<socketId>,
-   votes: { voterSocketId: targetSocketId },
+   votes: { voterId: targetId },
    roundNumber,
-   guessOptions: string[] | null,
-   outGuess: { choice: string, correct: boolean } | null
+   guessOptions: string[]|null,
+   outGuess: { choice, correct }|null
  }
 */
 const rooms = new Map();
 
-/* ------------------------------------------------
-   Helpers
---------------------------------------------------*/
-function makeRoomCode() { return nanoid(6).toUpperCase(); }
-function randomChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-function shuffle(a) { for (let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+const makeRoomCode = () => nanoid(6).toUpperCase();
+const randomChoice = arr => arr[Math.floor(Math.random() * arr.length)];
+const shuffle = a => { for (let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; };
 
 function ensureRoom(code) {
   if (!rooms.has(code)) {
     rooms.set(code, {
-      code,
-      hostId: null,
-      players: {},
-      order: [],
+      code, hostId: null,
+      players: {}, order: [],
       phase: 'LOBBY',
-      subjectId: null,
-      subjectName: '',
-      secretItem: '',
+      subjectId: null, subjectName: '', secretItem: '',
       outSocketId: null,
-      asked: new Set(),
-      answered: new Set(),
-      votes: {},
-      roundNumber: 0,
-      guessOptions: null,
-      outGuess: null
+      asked: new Set(), answered: new Set(),
+      votes: {}, roundNumber: 0,
+      guessOptions: null, outGuess: null
     });
   }
   return rooms.get(code);
 }
-
 function roomPublicState(room) {
   return {
     code: room.code,
@@ -131,11 +93,7 @@ function roomPublicState(room) {
     roundNumber: room.roundNumber
   };
 }
-
-function broadcastRoom(io, room) {
-  io.to(room.code).emit('room:update', roomPublicState(room));
-}
-
+const broadcastRoom = (io, room) => io.to(room.code).emit('room:update', roomPublicState(room));
 function qaCoverageMet(room) {
   const ids = Object.keys(room.players);
   if (ids.length < 2) return false;
@@ -143,9 +101,7 @@ function qaCoverageMet(room) {
   return ids.every(id => room.asked.has(id) || room.answered.has(id));
 }
 
-/* ------------------------------------------------
-   HTTP server + APIs
---------------------------------------------------*/
+// ==== HTTP + APIs ====
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -153,17 +109,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Admin APIs
 app.get('/api/subjects', (req, res) => {
   const subjects = q.subjectsAll.all();
-  const withItems = subjects.map(s => ({ ...s, items: q.itemsBySubject.all(s.id) }));
-  res.json(withItems);
+  res.json(subjects.map(s => ({ ...s, items: q.itemsBySubject.all(s.id) })));
 });
-
 app.post('/api/subjects', (req, res) => {
   const { name } = req.body || {};
-  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Missing name' });
+  if (!name) return res.status(400).json({ error: 'Missing name' });
   q.subjectInsert.run(String(name).trim());
   res.json({ ok: true });
 });
-
 app.post('/api/items', (req, res) => {
   const { subjectName, value } = req.body || {};
   if (!subjectName || !value) return res.status(400).json({ error: 'Missing fields' });
@@ -172,36 +125,30 @@ app.post('/api/items', (req, res) => {
   q.itemInsert.run(subj.id, String(value).trim());
   res.json({ ok: true });
 });
-
 app.delete('/api/items/:id', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad id' });
   q.itemDelete.run(id);
   res.json({ ok: true });
 });
-
-app.get('/api/scores', (req, res) => {
-  res.json(q.topScores.all());
+app.get('/api/scores', (req, res) => res.json(q.topScores.all()));
+app.delete('/api/scores', (req, res) => { // demo-only admin endpoint
+  q.scoresClear.run();
+  res.json({ ok: true });
 });
 
-/* ------------------------------------------------
-   WebSocket (Socket.IO)
---------------------------------------------------*/
 const server = http.createServer(app);
-const io = new SocketIOServer(server, {
-  // You can add CORS here if serving frontend elsewhere
-  // cors: { origin: "*", methods: ["GET","POST"] }
-});
+const io = new SocketIOServer(server);
 
+// ==== Socket.IO ====
 io.on('connection', (socket) => {
   let joinedCode = null;
 
-  /* ----- Room management ----- */
+  // Room management
   socket.on('room:create', ({ nickname }) => {
     const code = makeRoomCode();
     const room = ensureRoom(code);
     room.hostId = socket.id;
-    io.emit('room:created', { code });
     socket.emit('room:host', { code });
   });
 
@@ -216,7 +163,7 @@ io.on('connection', (socket) => {
 
     room.players[socket.id] = { id: socket.id, name, score: 0, inRoundRole: null };
     room.order.push(socket.id);
-    if (!room.hostId) room.hostId = socket.id; // first joiner becomes host
+    if (!room.hostId) room.hostId = socket.id;
 
     broadcastRoom(io, room);
   });
@@ -229,22 +176,17 @@ io.on('connection', (socket) => {
     delete room.players[socket.id];
     room.order = room.order.filter(id => id !== socket.id);
     socket.leave(joinedCode);
-
     if (room.hostId === socket.id) room.hostId = room.order[0] || null;
-
     broadcastRoom(io, room);
   });
 
-  /* ----- Game flow ----- */
-
-  // Start round → REVEAL
+  // Round flow
   socket.on('game:startRound', ({ code, subjectName }) => {
     const room = rooms.get(code);
     if (!room) return;
 
     const subj = q.subjectByName.get(subjectName);
     if (!subj) return socket.emit('game:error', { message: 'Unknown subject' });
-
     const items = q.itemsBySubject.all(subj.id);
     if (!items.length) return socket.emit('game:error', { message: 'No items for this subject' });
 
@@ -255,43 +197,38 @@ io.on('connection', (socket) => {
     }
 
     const secret = randomChoice(items).value;
-
     room.subjectId = subj.id;
     room.subjectName = subjectName;
     room.secretItem = secret;
     room.phase = 'REVEAL';
     room.roundNumber += 1;
 
-    // pick OUT
+    // choose OUT
     const outId = randomChoice(playerIds);
     room.outSocketId = outId;
-
-    // assign roles
     for (const pid of playerIds) {
       room.players[pid].inRoundRole = (pid === outId) ? 'OUT' : 'IN';
     }
 
-    // reset per-round trackers
+    // reset trackers
     room.asked.clear();
     room.answered.clear();
     room.votes = {};
     room.guessOptions = null;
     room.outGuess = null;
 
-    // DM reveal to each player
+    // private reveals
     for (const pid of playerIds) {
       const isIn = pid !== outId;
       io.to(pid).emit('game:reveal', {
         role: isIn ? 'IN' : 'OUT',
-        subjectName: subjectName,
+        subjectName: room.subjectName,
         secret: isIn ? secret : null
       });
     }
-
     broadcastRoom(io, room);
   });
 
-  // Go to QA
   socket.on('game:toQA', ({ code }) => {
     const room = rooms.get(code);
     if (!room) return;
@@ -299,21 +236,23 @@ io.on('connection', (socket) => {
     broadcastRoom(io, room);
   });
 
-  // Random prompt during QA (tracks asked/answered for coverage)
+  // >>> Robust random prompt (never self, prioritizes unmet coverage)
   socket.on('game:randomPrompt', ({ code }) => {
     const room = rooms.get(code);
     if (!room || room.phase !== 'QA') return;
-
     const players = Object.values(room.players);
     if (players.length < 2) return;
 
-    const asker = randomChoice(players);
-    let target = randomChoice(players);
-    let guard = 0;
-    while ((target.id === asker.id || room.answered.has(target.id)) && guard++ < 30) {
-      target = randomChoice(players);
-    }
+    // Prefer an asker who hasn't asked yet; else any
+    const askerPool = players.filter(p => !room.asked.has(p.id));
+    const asker = randomChoice(askerPool.length ? askerPool : players);
 
+    // Prefer a target who hasn't answered yet (and is not the asker); else any excluding asker
+    const notAsker = players.filter(p => p.id !== asker.id);
+    const targetPool = notAsker.filter(p => !room.answered.has(p.id));
+    const target = randomChoice(targetPool.length ? targetPool : notAsker);
+
+    // Record coverage
     room.asked.add(asker.id);
     room.answered.add(target.id);
 
@@ -321,39 +260,32 @@ io.on('connection', (socket) => {
     io.to(room.code).emit('game:coverage', { met: qaCoverageMet(room) });
   });
 
-  // Move to VOTE (only if QA coverage met)
   socket.on('game:toVote', ({ code }) => {
     const room = rooms.get(code);
     if (!room) return;
-
     if (!qaCoverageMet(room)) {
       io.to(socket.id).emit('game:error', { message: 'Q&A coverage not met yet: each player must have asked or answered at least once.' });
       return;
     }
-
     room.phase = 'VOTE';
     room.votes = {};
     broadcastRoom(io, room);
   });
 
-  // Cast a vote
   socket.on('game:vote', ({ code, targetId }) => {
     const room = rooms.get(code);
     if (!room || room.phase !== 'VOTE') return;
     if (!room.players[targetId]) return;
-
     room.votes[socket.id] = targetId;
     io.to(room.code).emit('game:votes:update', { count: Object.keys(room.votes).length });
   });
 
-  // Announce OUT & start GUESS phase
   socket.on('game:announceOut', ({ code }) => {
     const room = rooms.get(code);
     if (!room || room.phase !== 'VOTE') return;
     const outId = room.outSocketId;
     if (!outId) return;
 
-    // Build guess options: secret + up to 3 distractors from same subject
     const pool = q.itemsBySubject.all(room.subjectId)
       .map(i => i.value)
       .filter(v => v !== room.secretItem);
@@ -363,49 +295,38 @@ io.on('connection', (socket) => {
     room.guessOptions = options;
     room.phase = 'GUESS';
 
-    // Broadcast start (everyone knows who is OUT now)
     io.to(room.code).emit('game:guess:start', { outId, subjectName: room.subjectName });
-    // Send options privately to OUT
     io.to(outId).emit('game:guess:options', { options });
-
     broadcastRoom(io, room);
   });
 
-  // OUT submits guess
   socket.on('game:guess:answer', ({ code, choice }) => {
     const room = rooms.get(code);
     if (!room || room.phase !== 'GUESS') return;
-    if (socket.id !== room.outSocketId) return; // only OUT can answer
+    if (socket.id !== room.outSocketId) return;
     if (!room.guessOptions || !room.guessOptions.includes(choice)) return;
 
     const correct = choice === room.secretItem;
     room.outGuess = { choice, correct };
 
-    // Voting summary
     const outId = room.outSocketId;
-    const voters = Object.entries(room.votes); // [voterId, targetId]
+    const voters = Object.entries(room.votes);
     const correctVoters = voters.filter(([v, t]) => t === outId).map(([v]) => v);
     const anyCorrect = correctVoters.length > 0;
 
-    // Scoring:
-    // - Non-OUT voters: +2 if they voted for OUT
-    // - OUT: +3 if nobody voted them (escaped), +2 bonus if guessed secret correctly
     for (const pid of Object.keys(room.players)) {
       const p = room.players[pid];
       let delta = 0;
-
       if (pid === outId) {
-        if (!anyCorrect) delta += 3;     // escaped detection
-        if (correct) delta += 2;         // guessed secret
+        if (!anyCorrect) delta += 3; // escaped detection
+        if (correct) delta += 2;     // guessed secret
       } else {
         if (correctVoters.includes(pid)) delta += 2;
       }
-
       p.score += delta;
       if (delta) q.addScore.run(p.name, delta);
     }
 
-    // Move to RESULT
     room.phase = 'RESULT';
     io.to(room.code).emit('game:result', {
       outId,
@@ -413,28 +334,19 @@ io.on('connection', (socket) => {
       outGuess: room.outGuess,
       votes: room.votes
     });
-
     broadcastRoom(io, room);
   });
 
-  /* ----- Disconnect cleanup ----- */
   socket.on('disconnect', () => {
     if (!joinedCode) return;
     const room = rooms.get(joinedCode);
     if (!room) return;
-
     delete room.players[socket.id];
     room.order = room.order.filter(id => id !== socket.id);
     if (room.hostId === socket.id) room.hostId = room.order[0] || null;
-
     broadcastRoom(io, room);
   });
 });
 
-/* ------------------------------------------------
-   Start server
---------------------------------------------------*/
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log('Server listening on :' + PORT);
-});
+server.listen(PORT, () => console.log('Server listening on :' + PORT));
