@@ -28,8 +28,10 @@ $('#btn-create').onclick = () => {
   socket.emit('room:create', { nickname });
 };
 socket.on('room:host', ({ code }) => {
+  // Creator is auto-joined by server; just show the code bar for copying
   $('#room-code').value = code;
-  joinRoom(); // auto-join as host
+  $('#room-code-display').textContent = code;
+  $('#room-code-bar').classList.remove('hidden');
 });
 
 $('#btn-join').onclick = () => joinRoom();
@@ -52,6 +54,13 @@ socket.on('connect', () => {
 
 socket.on('room:update', (state) => {
   ROOM = state;
+
+  // Show code bar if in a room
+  if (state.code) {
+    $('#room-code-display').textContent = state.code;
+    $('#room-code-bar').classList.remove('hidden');
+  }
+
   $('#room-info').textContent = `Room ${state.code || '—'} • Round ${state.roundNumber} • Phase ${state.phase}`;
 
   // players list
@@ -93,6 +102,20 @@ function showPhase(phase){
   $('#btn-announce-out').disabled = !(phase === 'VOTE');
 }
 
+// Copy room code
+$('#btn-copy-code').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(ROOM.code || $('#room-code-display').textContent);
+    const btn = $('#btn-copy-code');
+    const old = btn.textContent;
+    btn.textContent = 'Code copied';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1700);
+  } catch (e) {
+    alert('Copy failed — you can manually copy the code shown.');
+  }
+};
+
 // Host controls
 $('#btn-start-round').onclick = () => {
   const subjectName = $('#subject-select').value;
@@ -113,12 +136,19 @@ socket.on('game:coverage', ({ met }) => {
   $('#coverage-hint').textContent = met ? 'Q&A coverage met ✅ — You can proceed to Voting.' : 'Q&A coverage not met ❌ — keep prompting.';
 });
 
-// Reveal DM
+// Reveal DM (boxed)
 socket.on('game:reveal', ({ role, subjectName, secret }) => {
-  const text = (role === 'IN')
-    ? `You are IN. Subject: ${subjectName}. SECRET: ${secret}`
-    : `You are OUT. Subject: ${subjectName}. Try to blend in!`;
-  $('#reveal-text').textContent = text;
+  const roleEl = $('#reveal-role');
+  const detailEl = $('#reveal-detail');
+  if (role === 'IN') {
+    roleEl.textContent = 'IN';
+    roleEl.className = 'role in';
+    detailEl.textContent = `Subject: ${subjectName} • SECRET: ${secret}`;
+  } else {
+    roleEl.textContent = 'OUT';
+    roleEl.className = 'role out';
+    detailEl.textContent = `Subject: ${subjectName} • Try to blend in!`;
+  }
   showPhase('REVEAL');
 });
 
