@@ -132,10 +132,7 @@ app.delete('/api/items/:id', (req, res) => {
   res.json({ ok: true });
 });
 app.get('/api/scores', (req, res) => res.json(q.topScores.all()));
-app.delete('/api/scores', (req, res) => { // demo-only admin endpoint
-  q.scoresClear.run();
-  res.json({ ok: true });
-});
+app.delete('/api/scores', (req, res) => { q.scoresClear.run(); res.json({ ok: true }); });
 
 const server = http.createServer(app);
 const io = new SocketIOServer(server);
@@ -144,14 +141,25 @@ const io = new SocketIOServer(server);
 io.on('connection', (socket) => {
   let joinedCode = null;
 
-  // Room management
+  // --- Room creation: creator is ALWAYS host & auto-joined as a player
   socket.on('room:create', ({ nickname }) => {
     const code = makeRoomCode();
     const room = ensureRoom(code);
     room.hostId = socket.id;
+
+    // Auto-join creator
+    socket.join(code);
+    joinedCode = code;
+    const name = String(nickname || 'Player').trim();
+    room.players[socket.id] = { id: socket.id, name, score: 0, inRoundRole: null };
+    room.order.push(socket.id);
+
+    // Tell creator their code; also broadcast state so lobby shows them as host
     socket.emit('room:host', { code });
+    broadcastRoom(io, room);
   });
 
+  // --- Join
   socket.on('room:join', ({ code, nickname }) => {
     code = String(code || '').toUpperCase().trim();
     const name = String(nickname || 'Player').trim();
@@ -163,11 +171,14 @@ io.on('connection', (socket) => {
 
     room.players[socket.id] = { id: socket.id, name, score: 0, inRoundRole: null };
     room.order.push(socket.id);
+
+    // DO NOT steal host from existing host; only set if null (brand new room without creator)
     if (!room.hostId) room.hostId = socket.id;
 
     broadcastRoom(io, room);
   });
 
+  // --- Leave
   socket.on('room:leave', () => {
     if (!joinedCode) return;
     const room = rooms.get(joinedCode);
@@ -176,14 +187,20 @@ io.on('connection', (socket) => {
     delete room.players[socket.id];
     room.order = room.order.filter(id => id !== socket.id);
     socket.leave(joinedCode);
+
+    // Reassign host ONLY if the host disconnected
     if (room.hostId === socket.id) room.hostId = room.order[0] || null;
+
     broadcastRoom(io, room);
   });
 
-  // Round flow
+  // --- Game flow
   socket.on('game:startRound', ({ code, subjectName }) => {
     const room = rooms.get(code);
     if (!room) return;
+
+    // Only host can start rounds
+    if (socket.id !== room.hostId) return socket.emit('game:error', { message: 'Only the room admin can start a round.' });
 
     const subj = q.subjectByName.get(subjectName);
     if (!subj) return socket.emit('game:error', { message: 'Unknown subject' });
@@ -232,11 +249,12 @@ io.on('connection', (socket) => {
   socket.on('game:toQA', ({ code }) => {
     const room = rooms.get(code);
     if (!room) return;
+    if (socket.id !== room.hostId) return;
     room.phase = 'QA';
     broadcastRoom(io, room);
   });
 
-  // >>> Robust random prompt (never self, prioritizes unmet coverage)
+  // Robust random prompt (never self, prioritizes unmet coverage)
   socket.on('game:randomPrompt', ({ code }) => {
     const room = rooms.get(code);
     if (!room || room.phase !== 'QA') return;
@@ -252,7 +270,6 @@ io.on('connection', (socket) => {
     const targetPool = notAsker.filter(p => !room.answered.has(p.id));
     const target = randomChoice(targetPool.length ? targetPool : notAsker);
 
-    // Record coverage
     room.asked.add(asker.id);
     room.answered.add(target.id);
 
@@ -263,6 +280,8 @@ io.on('connection', (socket) => {
   socket.on('game:toVote', ({ code }) => {
     const room = rooms.get(code);
     if (!room) return;
+    if (socket.id !== room.hostId) return;
+
     if (!qaCoverageMet(room)) {
       io.to(socket.id).emit('game:error', { message: 'Q&A coverage not met yet: each player must have asked or answered at least once.' });
       return;
@@ -283,6 +302,7 @@ io.on('connection', (socket) => {
   socket.on('game:announceOut', ({ code }) => {
     const room = rooms.get(code);
     if (!room || room.phase !== 'VOTE') return;
+    if (socket.id !== room.hostId) return;
     const outId = room.outSocketId;
     if (!outId) return;
 
