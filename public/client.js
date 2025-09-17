@@ -4,8 +4,8 @@ const $$ = sel => Array.from(document.querySelectorAll(sel));
 const socket = io();
 let ME = { id: null, name: '' };
 let ROOM = { code: null, hostId: null, players: [], phase: 'LOBBY', subjectName: '', roundNumber: 0 };
-let OUT_ID = null; // track current round OUT
-let OUT_OPTIONS = []; // options shown to OUT
+let OUT_ID = null;
+let OUT_OPTIONS = [];
 
 // Tabs
 function showTab(id){
@@ -21,32 +21,38 @@ $('#tab-game').onclick = () => showTab('#pane-game');
 $('#tab-admin').onclick = () => { refreshAdmin(); showTab('#pane-admin'); };
 $('#tab-leaderboard').onclick = () => { loadLeaderboard(); showTab('#pane-leaderboard'); };
 
-// Room actions
+// Create / Join
 $('#btn-create').onclick = () => {
-  const nickname = $('#nickname').value.trim() || 'Player';
+  const nickname = $('#nickname-create').value.trim() || 'Player';
   ME.name = nickname; localStorage.setItem('nickname', nickname);
   socket.emit('room:create', { nickname });
 };
-
 socket.on('room:host', ({ code }) => {
   $('#room-code').value = code;
-  joinRoom();
+  joinRoom(); // auto-join as host
 });
 
 $('#btn-join').onclick = () => joinRoom();
 function joinRoom(){
   const code = ($('#room-code').value || '').toUpperCase().trim();
   if (!code) return alert('Enter room code');
-  const nickname = $('#nickname').value.trim() || 'Player';
+  const nickname = ($('#nickname-join').value || $('#nickname-create').value || '').trim() || 'Player';
   ME.name = nickname; localStorage.setItem('nickname', nickname);
   socket.emit('room:join', { code, nickname });
 }
 
-socket.on('connect', () => { ME.id = socket.id; $('#nickname').value = localStorage.getItem('nickname') || ''; });
+socket.on('connect', () => {
+  ME.id = socket.id;
+  const saved = localStorage.getItem('nickname') || '';
+  if (saved) {
+    $('#nickname-create').value = saved;
+    $('#nickname-join').value = saved;
+  }
+});
 
 socket.on('room:update', (state) => {
   ROOM = state;
-  $('#room-info').textContent = `Room ${state.code} • Round ${state.roundNumber} • Phase ${state.phase}`;
+  $('#room-info').textContent = `Room ${state.code || '—'} • Round ${state.roundNumber} • Phase ${state.phase}`;
 
   // players list
   const ul = $('#players');
@@ -149,10 +155,9 @@ socket.on('game:guess:start', ({ outId, subjectName }) => {
   const outName = ROOM.players.find(p => p.id === outId)?.name || 'Unknown';
   $('#announce-text').textContent = `OUT is ${outName}. Subject: ${subjectName}. Now the OUT must guess the secret.`;
   $('#guess-status').textContent = (ME.id === outId) ? 'Select the correct secret:' : 'Waiting for OUT to guess...';
-  $('#guess-options').innerHTML = ''; // will fill when options arrive
+  $('#guess-options').innerHTML = '';
   showPhase('GUESS');
 });
-
 socket.on('game:guess:options', ({ options }) => {
   OUT_OPTIONS = options || [];
   const cont = $('#guess-options');
@@ -167,7 +172,6 @@ socket.on('game:guess:options', ({ options }) => {
     btn.onclick = () => {
       $('#guess-status').textContent = `You selected: ${opt}. Sending...`;
       socket.emit('game:guess:answer', { code: ROOM.code, choice: opt });
-      // Prevent double clicks
       cont.querySelectorAll('button').forEach(b => b.disabled = true);
     };
     cont.appendChild(btn);
@@ -191,17 +195,14 @@ async function fetchJSON(url, opts){
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
-
 async function loadSubjectsForSelect(){
   const data = await fetchJSON('/api/subjects');
   const sel = $('#subject-select');
   const prev = sel.value;
   sel.innerHTML = '<option value="">Select subject…</option>' + data.map(s => `<option>${s.name}</option>`).join('');
   if (prev) sel.value = prev;
-  // Render admin list if visible
   if (!$('#pane-admin').classList.contains('hidden')) renderAdminSubjects(data);
 }
-
 async function refreshAdmin(){ await loadSubjectsForSelect(); }
 
 $('#btn-add-subject').onclick = async () => {
@@ -211,7 +212,6 @@ $('#btn-add-subject').onclick = async () => {
   $('#new-subject').value='';
   refreshAdmin();
 };
-
 $('#btn-add-item').onclick = async () => {
   const subjectName = $('#item-subject').value.trim();
   const value = $('#item-value').value.trim();
@@ -220,7 +220,6 @@ $('#btn-add-item').onclick = async () => {
   $('#item-value').value='';
   refreshAdmin();
 };
-
 function renderAdminSubjects(data){
   const container = $('#subjects');
   container.innerHTML = '';
@@ -258,3 +257,8 @@ async function loadLeaderboard(){
     ul.appendChild(li);
   });
 }
+$('#btn-clear-leaderboard').onclick = async () => {
+  if (!confirm('Clear the entire leaderboard? This cannot be undone.')) return;
+  await fetchJSON('/api/scores', { method:'DELETE' });
+  loadLeaderboard();
+};
