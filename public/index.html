@@ -44,6 +44,12 @@
             </div>
           </div>
 
+          <!-- room code + copy -->
+          <div id="room-code-bar" class="codebar hidden">
+            <div class="codepill"><span id="room-code-display">— — — — — —</span></div>
+            <button id="btn-copy-code" class="secondary">Copy code</button>
+          </div>
+
           <div id="room-info" class="muted"></div>
 
           <div id="lobby" class="grid two">
@@ -66,16 +72,22 @@
             </div>
           </div>
 
+          <!-- REVEAL: big status box -->
           <div id="phase-reveal" class="phase hidden">
             <h3>Reveal</h3>
-            <p id="reveal-text"></p>
+            <div id="reveal-box" class="status-box">
+              <div id="reveal-role" class="role">—</div>
+              <div id="reveal-detail" class="detail">—</div>
+            </div>
             <p class="muted">Pass the phone to each player as prompted.</p>
           </div>
 
           <div id="phase-qa" class="phase hidden">
             <h3>Q&A</h3>
             <div class="row">
-              <div id="prompt-text" class="prompt"></div>
+              <div id="prompt-text" class="prompt status-box light">
+                Waiting for prompt…
+              </div>
             </div>
             <p class="muted">Each player must ask or answer at least once before voting.</p>
           </div>
