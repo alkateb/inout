@@ -23,12 +23,27 @@
       <section id="pane-game" class="pane">
         <div class="card">
           <h2>Room</h2>
-          <div class="row">
-            <input id="nickname" placeholder="Your nickname" />
-            <button id="btn-create">Create Room</button>
-            <input id="room-code" placeholder="CODE" maxlength="6" />
-            <button id="btn-join">Join</button>
+
+          <!-- clearer, stacked actions -->
+          <div class="room-actions">
+            <div class="room-block">
+              <h3>Create Room</h3>
+              <div class="stack">
+                <input id="nickname-create" placeholder="Your nickname" />
+                <button id="btn-create">Create Room</button>
+              </div>
+            </div>
+
+            <div class="room-block">
+              <h3>Join Room</h3>
+              <div class="stack">
+                <input id="nickname-join" placeholder="Your nickname" />
+                <input id="room-code" placeholder="ROOM CODE (e.g., 6 letters)" maxlength="6" />
+                <button id="btn-join">Join</button>
+              </div>
+            </div>
           </div>
+
           <div id="room-info" class="muted"></div>
 
           <div id="lobby" class="grid two">
@@ -107,6 +122,9 @@
       <section id="pane-leaderboard" class="pane hidden">
         <div class="card">
           <h2>Leaderboard</h2>
+          <div class="row" style="margin-bottom:10px;">
+            <button id="btn-clear-leaderboard" class="secondary">Clear Leaderboard</button>
+          </div>
           <ul id="leaderboard"></ul>
         </div>
       </section>
