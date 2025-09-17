@@ -145,7 +145,7 @@ socket.on('game:reveal', ({ role, subjectName, secret }) => {
     roleEl.className = 'role in';
     detailEl.textContent = `Subject: ${subjectName} • SECRET: ${secret}`;
   } else {
-    roleEl.textContent = 'OUT';
+    roleEl.textContent = 'OUT to Kizilay';
     roleEl.className = 'role out';
     detailEl.textContent = `Subject: ${subjectName} • Try to blend in!`;
   }
